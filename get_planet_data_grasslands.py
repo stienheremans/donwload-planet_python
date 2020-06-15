@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import json
-import ogr
+from osgeo import ogr
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import geojson
@@ -14,12 +14,12 @@ import gdal
 
 # import the shapefile of your study site and transform it into a geojson
 driver = ogr.GetDriverByName('ESRI Shapefile')
-shp_path = "Q:\Projects\PRJ_RemSen\Remote sensing for grasslands (Stien)\Analyses 2020\Inputs\Study sites bboxes\Turnhout_bbox.shp"
+shp_path = "F:/Postdoc 2020-2024/Projects/Graslandonderzoek/1. Inputs/Study sites bboxes/Turnhout_bbox.shp"
 file = gpd.read_file(shp_path)
-file.to_file("Turnhout_gras.json", driver="GeoJSON")
+file.to_file("F:/Postdoc 2020-2024/Projects/Graslandonderzoek/2. Methodology/Part 1 - Creating time series/C - Planet data/GeoJSON/Turnhout_gras.json", driver="GeoJSON")
 
 
-with open("Turnhout_gras.json") as f:
+with open("F:/Postdoc 2020-2024/Projects/Graslandonderzoek/2. Methodology/Part 1 - Creating time series/C - Planet data/GeoJSON/Turnhout_gras.json") as f:
     gj = geojson.load(f)
 features = gj['features'][0]
   
@@ -105,7 +105,7 @@ geo_hull = gpd.GeoDataFrame(index=[0], crs=crs, geometry = [poly_hull])
 geo_hull_tr =geo_hull.to_crs({'init': 'epsg:32631'})
 hull_area = geo_hull_tr['geometry'].area[0]
 
-df_results = pd.DataFrame(index = range(len(image_ids)), columns=['im_id', 'overlap', 'clouds', 'date', 'month', 'day', 'dekad', 'deviat', 'anal_sr'])
+df_results = pd.DataFrame(index = range(len(image_ids)), columns=['im_id', 'overlap', 'clouds', 'date', 'month', 'day', 'period', 'deviat', 'anal_sr'])
 df_results['im_id']= image_ids
 df_results['date']= image_dates
 df_results['month']= image_months
@@ -125,38 +125,70 @@ for x in range(len(image_ids)):
     inters_area = geo_inters.area[0]
     perc_inters = inters_area/hull_area*100
     df_results['overlap'][x] = perc_inters
-    if df_results['day'][x]<11:
-        df_results['dekad'][x]= 1
-        df_results['deviat'][x]= abs(df_results['day'][x]-5)
+    if df_results['day'][x]<6:
+        df_results['period'][x]= 1
+        df_results['deviat'][x]= abs(df_results['day'][x]-3)
+    elif df_results['day'][x]<11:
+        df_results['period'][x]= 2
+        df_results['deviat'][x]= abs(df_results['day'][x]-8)
+    elif df_results['day'][x]<16:
+        df_results['period'][x]= 3
+        df_results['deviat'][x]= abs(df_results['day'][x]-13)
     elif df_results['day'][x]<21:
-        df_results['dekad'][x]= 2
-        df_results['deviat'][x]= abs(df_results['day'][x]-15)
+        df_results['period'][x]= 4
+        df_results['deviat'][x]= abs(df_results['day'][x]-18)
+    elif df_results['day'][x]<26:
+        df_results['period'][x]= 5
+        df_results['deviat'][x]= abs(df_results['day'][x]-23)
     else: 
-        df_results['dekad'][x]= 3
-        df_results['deviat'][x]= abs(df_results['day'][x]-25)
+        df_results['period'][x]= 6
+        df_results['deviat'][x]= abs(df_results['day'][x]-28)
     
 
 df_results['overlap'] = df_results['overlap'].astype('float')
 
-# Select only the images with 100% overlap with the study area    
+# Select only the images with more than 80% overlap with the study area    
 df_results2 = df_results[df_results['overlap']>=80]
 
 # Select only the images with downloadable analytic_sr asset
 df_results2 = df_results2[df_results2['anal_sr']==True]
 
-# Select only the images with minimum clouds per dekad
+# Select only the images with minimum clouds per period
 def func(group):
     return group.loc[group['overlap'] == group['overlap'].max()]
 
-df_results3 = df_results2.groupby(['month','dekad'], as_index=False).apply(func).reset_index(drop=True)
+df_results3 = df_results2.groupby(['month','period'], as_index=False).apply(func).reset_index(drop=True)
 
-# Select the image with minimal clouds that is closest to the mid of the dekad
+# Select the image with minimal clouds that is closest to the mid of the period
 def func2(group):
     return group.loc[group['deviat'] == group['deviat'].min()]
 
-df_results4 = df_results3.groupby(['month','dekad'], as_index=False).apply(func2).reset_index(drop=True)
+df_results4 = df_results3.groupby(['month','period'], as_index=False).apply(func2).reset_index(drop=True)
 
+# Write all df_results to an excel file (in different tabs)
+from openpyxl import Workbook, load_workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
 
+filename = "F:/Postdoc 2020-2024/Projects/Graslandonderzoek/2. Methodology/Part 1 - Creating time series/C - Planet data/Image lists/Planet_imgs_Turnhout_2018.xlsx"
+wb = Workbook()
+sheet1 = wb.create_sheet('all_imgs',0)
+sheet2 = wb.create_sheet('imgs_overlap_anal',1)
+sheet3 = wb.create_sheet('imgs_min_clouds',2)
+sheet4 = wb.create_sheet('imgs_min_deviat',3)
+
+for x in dataframe_to_rows(df_results):
+    sheet1.append(x)
+    
+for x in dataframe_to_rows(df_results2):
+    sheet2.append(x)
+    
+for x in dataframe_to_rows(df_results3):
+    sheet3.append(x)
+    
+for x in dataframe_to_rows(df_results4):
+    sheet4.append(x)
+
+wb.save(filename)
 
     
     
