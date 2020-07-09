@@ -11,6 +11,8 @@ import shapely
 from shapely.geometry import box, Polygon
 import pandas as pd
 import gdal
+import time
+import numpy as np
 
 # import the shapefile of your study site and transform it into a geojson
 driver = ogr.GetDriverByName('ESRI Shapefile')
@@ -35,7 +37,6 @@ geometry = {
 # replace coordinates in the empty json file created above by the actual coordinates from the geojson file
 geometry["coordinates"] = features.geometry.coordinates
 print(geometry)
-
 
 
 # get images that overlap with your study site
@@ -105,14 +106,14 @@ geo_hull = gpd.GeoDataFrame(index=[0], crs=crs, geometry = [poly_hull])
 geo_hull_tr =geo_hull.to_crs({'init': 'epsg:32631'})
 hull_area = geo_hull_tr['geometry'].area[0]
 
-df_results = pd.DataFrame(index = range(len(image_ids)), columns=['im_id', 'overlap', 'clouds', 'date', 'month', 'day', 'period', 'deviat', 'anal_sr'])
+df_results = pd.DataFrame(index = range(len(image_ids)), columns=['im_id', 'overlap', 'clouds', 'date', 'month', 'day', 'julian', 'period', 'deviat', 'anal_sr'])
 df_results['im_id']= image_ids
 df_results['date']= image_dates
 df_results['month']= image_months
 df_results['day']= image_days
 df_results['clouds']= image_clouds
 df_results['day'] = df_results['day'].astype('int32')
-
+df_results['julian'] = time.strptime(df_results['date'],"%Y.%m.%d").tm_yday
 
 for x in range(len(image_ids)):
     anal_sr =  'assets.analytic_sr:download' in  search_result.json()['features'][x]['_permissions']
@@ -125,27 +126,13 @@ for x in range(len(image_ids)):
     inters_area = geo_inters.area[0]
     perc_inters = inters_area/hull_area*100
     df_results['overlap'][x] = perc_inters
-    if df_results['day'][x]<6:
-        df_results['period'][x]= 1
-        df_results['deviat'][x]= abs(df_results['day'][x]-3)
-    elif df_results['day'][x]<11:
-        df_results['period'][x]= 2
-        df_results['deviat'][x]= abs(df_results['day'][x]-8)
-    elif df_results['day'][x]<16:
-        df_results['period'][x]= 3
-        df_results['deviat'][x]= abs(df_results['day'][x]-13)
-    elif df_results['day'][x]<21:
-        df_results['period'][x]= 4
-        df_results['deviat'][x]= abs(df_results['day'][x]-18)
-    elif df_results['day'][x]<26:
-        df_results['period'][x]= 5
-        df_results['deviat'][x]= abs(df_results['day'][x]-23)
-    else: 
-        df_results['period'][x]= 6
-        df_results['deviat'][x]= abs(df_results['day'][x]-28)
-    
+    df_results['julian'][x] = time.strptime(df_results['date'][x],"%Y-%m-%d").tm_yday
+    df_results['period'][x] = np.ceil((int(df_results['julian'][x])-int(time.strptime("03-03","%m-%d").tm_yday))/5)
+    df_results['deviat'][x] = abs(df_results['julian'][x] - (int(time.strptime("03-03","%m-%d").tm_yday) + (df_results['period'][x] -1) *5 + 2))
 
 df_results['overlap'] = df_results['overlap'].astype('float')
+df_results['julian'] = df_results['julian'].astype('int')
+df_results['deviat'] = df_results['deviat'].astype('int')
 
 # Select only the images with more than 80% overlap with the study area    
 df_results2 = df_results[df_results['overlap']>=80]
@@ -157,13 +144,13 @@ df_results2 = df_results2[df_results2['anal_sr']==True]
 def func(group):
     return group.loc[group['overlap'] == group['overlap'].max()]
 
-df_results3 = df_results2.groupby(['month','period'], as_index=False).apply(func).reset_index(drop=True)
+df_results3 = df_results2.groupby(['period'], as_index=False).apply(func).reset_index(drop=True)
 
 # Select the image with minimal clouds that is closest to the mid of the period
 def func2(group):
     return group.loc[group['deviat'] == group['deviat'].min()]
 
-df_results4 = df_results3.groupby(['month','period'], as_index=False).apply(func2).reset_index(drop=True)
+df_results4 = df_results3.groupby(['period'], as_index=False).apply(func2).reset_index(drop=True)
 
 # Write all df_results to an excel file (in different tabs)
 from openpyxl import Workbook, load_workbook
